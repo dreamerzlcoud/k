@@ -317,9 +317,8 @@ class KoreanHandwritingGenerator:
         tokens = tokenize_text(text)
         U = len(tokens)
         c = self._embed_tokens(tokens)
-        target_strokes = expected_syllable_strokes(text) if len(text) == 1 else None
         if max_len is None:
-            max_len = 56 if len(text) == 1 else min(900, max(90, len(text) * 58))
+            max_len = 72 if len(text) == 1 else min(900, max(90, len(text) * 62))
 
         if seed_seq:
             primed = self._primed_hidden(tuple(seed_seq[:4]))
@@ -337,10 +336,9 @@ class KoreanHandwritingGenerator:
         mdn_raw, pen_logit, phi = self._step((0.0, 0.0, 0.0, 0.0), c, state)
         dots: list[dict] = []
         parked_run = 0
-        strokes_done = 0
         K = self.num_mixtures
 
-        for _ in range(max_len):
+        for step_idx in range(max_len):
             p_sig = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, pen_logit / max(0.05, temperature)))))
             if temperature <= 0.05:
                 pen_state = 1 if (1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, pen_logit))))) > 0.5 else 0
@@ -382,11 +380,6 @@ class KoreanHandwritingGenerator:
                 "_f_std": f_std,
             })
 
-            if pen_state == 1:
-                strokes_done += 1
-                if target_strokes is not None and strokes_done >= target_strokes:
-                    break
-
             mdn_raw, pen_logit, phi = self._step((dx, dy, float(pen_state), f_std), c, state)
 
             if f_std < PARK_FORCE:
@@ -396,7 +389,7 @@ class KoreanHandwritingGenerator:
 
             if parked_run >= PARK_RUN:
                 break
-            if pen_state == 1 and phi[U] > max(phi[:U]):
+            if step_idx >= 52 and pen_state == 1 and phi[U] > max(phi[:U]):
                 break
 
         while dots and dots[-1]["_f_std"] < PARK_FORCE:
@@ -506,7 +499,7 @@ def extract_style_profile(profile: dict) -> dict:
                 if tb and bb:
                     top_cx = (tb[0] + tb[2]) / 2.0
                     bot_cx = (bb[0] + bb[2]) / 2.0
-                    slants.append(max(-0.35, min(0.35, (top_cx - bot_cx) / max(8.0, h * 0.5))))
+                    slants.append(max(-0.08, min(0.08, ((top_cx - bot_cx) / max(8.0, h * 0.5)) * 0.15)))
             except Exception:
                 continue
 
@@ -518,7 +511,7 @@ def extract_style_profile(profile: dict) -> dict:
     )
     mean_tilt = sum(tilts_x) / len(tilts_x) if tilts_x else 0.0
     slant_val = (sum(slants) / len(slants) if slants else 0.0) + (mean_tilt / 90.0) * 0.12
-    slant_val = max(-0.32, min(0.32, slant_val))
+    slant_val = max(-0.22, min(0.22, slant_val))
     aspect_val = max(0.68, min(1.42, sum(aspects) / len(aspects) if aspects else 0.96))
     density_val = sum(densities) / len(densities) if densities else 0.22
     stroke_scale = max(0.72, min(1.45, 0.8 + (mean_p - 0.5) * 0.6 + (density_val - 0.22) * 1.1))
@@ -672,6 +665,30 @@ def render_spen_strokes_to_data_url(strokes: list[dict], color: str = "#000000")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _render_punctuation_glyph(char: str, pixel_height: int, color: str, rng: random.Random) -> Image.Image:
+    rgb = ImageColor.getrgb(color)
+    w = max(8, round(pixel_height * 0.35))
+    h = max(12, pixel_height)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    r = max(1.8, pixel_height * 0.065)
+    cx = w * 0.45 + rng.uniform(-0.8, 0.8)
+    by = h * 0.82 + rng.uniform(-0.8, 0.8)
+    if char == ".":
+        draw.ellipse((cx - r, by - r, cx + r, by + r), fill=(*rgb, 235))
+    elif char == ",":
+        draw.ellipse((cx - r, by - r, cx + r, by + r), fill=(*rgb, 235))
+        draw.line([(cx, by), (cx - r * 1.1, by + r * 2.4)], fill=(*rgb, 225), width=max(1, round(r * 1.1)))
+    elif char == ":":
+        draw.ellipse((cx - r, h * 0.38 - r, cx + r, h * 0.38 + r), fill=(*rgb, 235))
+        draw.ellipse((cx - r, by - r, cx + r, by + r), fill=(*rgb, 235))
+    elif char == "·":
+        draw.ellipse((cx - r, h * 0.50 - r, cx + r, h * 0.50 + r), fill=(*rgb, 235))
+    else:
+        draw.ellipse((cx - r, by - r, cx + r, by + r), fill=(*rgb, 235))
+    return img
+
+
 def synthesize_korean_glyph(
     char: str,
     pixel_height: int,
@@ -680,6 +697,8 @@ def synthesize_korean_glyph(
     rng: random.Random,
 ) -> Image.Image:
     """Synthesize a single unseen Hangul syllable personalized to the user's handwriting profile."""
+    if char in {".", ",", ":", "·"}:
+        return _render_punctuation_glyph(char, pixel_height, color, rng)
     style = extract_style_profile(profile)
     seed_bucket = rng.randint(0, 2)
     dots = _cached_syllable_dots(
@@ -728,19 +747,28 @@ def synthesize_korean_sentence(
             h = max(6, round(pixel_height * rng.uniform(0.95, 1.04)))
             w = max(3, round(h * sample.width / max(1, sample.height)))
             sample = sample.resize((w, h), Image.Resampling.LANCZOS)
-            pieces.append((sample, x, max(0, round(pixel_height * 0.18) + y_jitter)))
+            # Boost thin downsampled stroke alpha so direct crops match AI stroke contrast
+            r_ch, g_ch, b_ch, a_ch = sample.split()
+            a_ch = a_ch.point(lambda p: min(255, int(p * 1.45)))
+            sample.putalpha(a_ch)
+            pieces.append((sample, x, max(0, round(pixel_height * 0.16) + y_jitter)))
             x += w + spacing_px
             direct_used.append(ch)
-        elif is_hangul_syllable(ch) or ch in SYMBOLS:
+        elif is_hangul_syllable(ch) or ch in {".", ",", ":"}:
             img = synthesize_korean_glyph(ch, pixel_height, color, profile, rng)
             pieces.append((img, x, max(0, round(pixel_height * 0.16) + y_jitter)))
             x += img.width + spacing_px
-            ai_generated.append(ch)
+            if is_hangul_syllable(ch):
+                ai_generated.append(ch)
         else:
+            from .render import text_font
             fallback_used.append(ch)
-            img = synthesize_korean_glyph("가", pixel_height, color, profile, rng)
-            pieces.append((img, x, max(0, round(pixel_height * 0.16) + y_jitter)))
-            x += img.width + spacing_px
+            font = text_font(pixel_height)
+            cw = max(6, round(font.getlength(ch)))
+            img = Image.new("RGBA", (cw + 4, max_h), (0, 0, 0, 0))
+            ImageDraw.Draw(img).text((2, 0), ch, font=font, fill=color)
+            pieces.append((img, x, max(0, round(pixel_height * 0.10) + y_jitter)))
+            x += cw + spacing_px
 
     canvas = Image.new("RGBA", (max(32, x + 12), max_h), (0, 0, 0, 0))
     for img, px, py in pieces:

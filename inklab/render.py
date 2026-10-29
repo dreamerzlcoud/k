@@ -196,14 +196,16 @@ def render_text(
             h = pixel_size
             w = max(2, round(h * sample.width / sample.height))
             sample = sample.resize((w, h), Image.Resampling.LANCZOS)
+            sample.putalpha(sample.getchannel("A").point(lambda p: min(255, int(p * 1.45))))
             advance = w + pixel_size * spacing_ratio
             used += 1
-        elif use_ai and is_hangul_syllable(char):
+        elif use_ai and (is_hangul_syllable(char) or char in {".", ",", ":", "·"}):
             missing.add(char)
             sample = synthesize_korean_glyph(char, pixel_size, color, profile or {"glyphs": glyphs}, rng)
             advance = sample.width + pixel_size * spacing_ratio
-            ai_generated.add(char)
-            ai_used += 1
+            if is_hangul_syllable(char):
+                ai_generated.add(char)
+                ai_used += 1
         else:
             sample = None
             advance = font.getlength(char)
