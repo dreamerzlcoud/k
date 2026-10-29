@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "inklab": {
+      "command": "C:\\Users\\khc70\\Downloads\\new_project\\new-project\\.venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\khc70\\Downloads\\new_project\\new-project\\scripts\\run_mcp.py"
+      ],
+      "env": {
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+}

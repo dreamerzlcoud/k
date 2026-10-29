@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: inklab-shared
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /healthz
+    envVars:
+      - key: INKLAB_PUBLIC_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: INKLAB_CLOUD
+        value: "1"

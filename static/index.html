@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>InkLab · 나의 필기로 완성하는 PDF</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css?v=0.1.1" />
+  </head>
+  <body>
+    <aside class="rail">
+      <a class="brand" href="/" aria-label="InkLab 홈"
+        ><span class="brandmark">i<span>∙</span></span
+        ><b>inklab<span class="beta">LOCAL</span></b></a
+      >
+      <div class="rail-label">MY WORKSPACE</div>
+      <button class="nav active" data-tab="workspace">
+        <span>▧</span> PDF 작업실
+      </button>
+      <button class="nav" data-tab="handwriting">
+        <span>✎</span> 나의 필기체 <i id="glyph-badge">0</i>
+      </button>
+      <button class="nav" data-tab="connect">
+        <span>⌘</span> GPT · MCP 연결
+      </button>
+      <div class="rail-rule"></div>
+      <div class="rail-label">최근 문서</div>
+      <div id="recent-documents"></div>
+      <div class="rail-bottom">
+        <span class="status-dot"></span> 이 컴퓨터에 저장<br /><small
+          >필기에서 시작하는 나만의 작업실</small
+        >
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div class="breadcrumb">
+          작업 공간 <span>/</span> <b id="tab-title">PDF 작업실</b>
+        </div>
+        <span class="local-pill">● LOCAL WORKSPACE</span>
+      </header>
+      <section id="workspace" class="tab active">
+        <div class="heading">
+          <div>
+            <div class="eyebrow">FROM YOUR MIND, IN YOUR HAND.</div>
+            <h1>풀이를 담고, 나의 필기를 입히세요.</h1>
+            <p>정확한 수식 구조 위에, 직접 쓴 글자의 모양을 더합니다.</p>
+          </div>
+          <label class="button primary upload"
+            >＋ PDF 가져오기<input
+              id="pdf-upload"
+              type="file"
+              accept="application/pdf,.pdf"
+              hidden
+          /></label>
+        </div>
+        <div class="flow">
+          <span><b>01</b> PDF 가져오기</span><i>⟶</i
+          ><span><b>02</b> 풀이 · 수식 배치</span><i>⟶</i
+          ><span><b>03</b> 필기 적용 · 내보내기</span>
+        </div>
+        <div id="empty-state" class="empty-state">
+          <div class="paper-illustration">
+            <span>∫</span>
+            <div>f(x) dx</div>
+            <hr />
+            <hr />
+            <hr />
+          </div>
+          <h2>첫 번째 페이지를 펼쳐볼까요?</h2>
+          <p>
+            학교 과제 PDF를 가져오거나, 공학수학 예제로 시작하세요.<br />원본은
+            보관하고 필기를 더한 새 PDF를 만듭니다.
+          </p>
+          <button id="demo" class="button">
+            예제 문서로 둘러보기 <span>↗</span></button
+          ><small>PDF 최대 30MB · 200페이지</small>
+        </div>
+        <div id="editor" hidden>
+          <div class="document-toolbar">
+            <div>
+              <span class="file-icon">PDF</span
+              ><strong id="document-name"></strong>
+            </div>
+            <div>
+              <button id="save-layout" class="button small">배치 저장</button
+              ><button id="render" class="button primary small">
+                필기 미리보기 ↗</button
+              ><a id="download" class="button dark small disabled" download
+                >PDF 다운로드 ↓</a
+              >
+            </div>
+          </div>
+          <div class="editor-grid">
+            <div class="paper-area">
+              <div class="page-toolbar">
+                <button id="prev-page" aria-label="이전 페이지">←</button
+                ><span id="page-number"></span
+                ><button id="next-page" aria-label="다음 페이지">→</button
+                ><span class="divider"></span
+                ><button id="original" class="text-button">
+                  원본 · 배치 보기</button
+                ><span id="preview-mode">배치 모드</span>
+              </div>
+              <div id="paper" class="paper">
+                <img id="page-image" alt="PDF 페이지" />
+                <div id="block-overlays"></div>
+              </div>
+              <p class="canvas-help">
+                블록을 드래그해 위치를 조정하세요. 좌표와 크기의 단위는
+                pt입니다.
+              </p>
+            </div>
+            <aside class="inspector">
+              <div class="inspector-heading">
+                <h3>페이지에 담을 내용</h3>
+                <span id="block-count">0개</span>
+              </div>
+              <div class="button-row">
+                <button id="add-math" class="button small">＋ 수식</button
+                ><button id="add-text" class="button small">＋ 텍스트</button>
+              </div>
+              <div id="block-list"></div>
+              <div id="block-editor" hidden>
+                <div class="label-row">
+                  <label for="content"
+                    >내용 <span id="content-type">LaTeX</span></label
+                  ><button id="delete-block" class="text-button danger">
+                    삭제
+                  </button>
+                </div>
+                <textarea
+                  id="content"
+                  spellcheck="false"
+                  rows="5"
+                  placeholder="\\frac{1}{2}mv^2"
+                ></textarea>
+                <div class="math-shortcuts">
+                  <button data-math="fraction">분수</button
+                  ><button data-math="integral">적분</button
+                  ><button data-math="matrix">행렬</button
+                  ><button data-math="aligned">전개식</button>
+                </div>
+                <div class="field-grid">
+                  <label>X<input id="field-x" type="number" min="0" /></label
+                  ><label>Y<input id="field-y" type="number" min="0" /></label
+                  ><label
+                    >너비<input id="field-width" type="number" min="1" /></label
+                  ><label
+                    >높이<input
+                      id="field-height"
+                      type="number"
+                      min="1" /></label
+                  ><label
+                    >글자 크기<input
+                      id="field-size"
+                      type="number"
+                      min="6"
+                      max="64" /></label
+                  ><label
+                    >잉크<input id="ink-color" type="color" value="#243d78"
+                  /></label>
+                </div>
+              </div>
+              <div class="inspector-section">
+                <label for="profile-select">필기 프로필</label
+                ><select id="profile-select"></select>
+                <p class="hint">
+                  등록한 글자는 나의 필기, 나머지는 기본 글꼴로 표시됩니다.
+                </p>
+              </div>
+              <details class="ai-panel">
+                <summary>✧ GPT로 풀이 초안 만들기</summary>
+                <p class="hint">
+                  이 PDF와 요청 내용을 OpenAI API로 보냅니다. 별도 API 설정과
+                  사용 요금이 적용됩니다.
+                </p>
+                <textarea
+                  id="ai-instructions"
+                  rows="3"
+                  placeholder="예: 1번 문제를 단계별로 풀고 빈 공간에 배치해줘."
+                ></textarea
+                ><button id="ai-draft" class="button small">
+                  PDF 전송 · 초안 생성
+                </button>
+                <p id="ai-status" class="hint"></p>
+              </details>
+            </aside>
+          </div>
+          <div id="report" class="report" hidden></div>
+        </div>
+      </section>
+      <section id="handwriting" class="tab">
+        <div class="heading">
+          <div>
+            <div class="eyebrow">A LITTLE MORE YOU.</div>
+            <h1>나의 필기 라이브러리</h1>
+            <p>이미지 · PDF 속 글자를 모아, 수식과 문장에 그대로 사용하세요.</p>
+          </div>
+          <button id="new-profile" class="button">＋ 새 프로필</button>
+        </div>
+        <div class="note-banner">
+          <span>✎</span>
+          <div>
+            <b>실제 필기를 한 글자씩 등록합니다.</b>
+            <p>
+              샘플 영역을 선택하고 해당 글자를 입력하세요. 여러 변형을 등록하면
+              반복되는 글자의 모양도 달라집니다.
+            </p>
+          </div>
+          <select id="library-profile" aria-label="편집할 필기 프로필"></select
+          ><span id="profile-name" hidden>나의 필기</span>
+        </div>
+        <div class="sample-grid">
+          <div class="card">
+            <div class="card-top">
+              <div>
+                <span class="step">01</span>
+                <h3>필기 샘플 가져오기</h3>
+              </div>
+              <label class="button small upload"
+                >파일 선택<input
+                  id="sample-upload"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,application/pdf,.pdf"
+                  hidden
+              /></label>
+            </div>
+            <p class="hint">PNG · JPG · WEBP · PDF / 최대 30MB, PDF 30페이지</p>
+            <select id="sample-page" hidden aria-label="샘플 페이지"></select>
+            <div id="sample-empty" class="sample-empty">
+              노트 이미지나 PDF를 가져오세요.<br /><span
+                >선택한 글자 영역만 필기 샘플로 등록됩니다.</span
+              >
+            </div>
+            <div id="sample-zoom" class="sample-zoom" hidden>
+              <button id="zoom-out" aria-label="샘플 축소">−</button
+              ><span id="zoom-label">100%</span
+              ><button id="zoom-in" aria-label="샘플 확대">＋</button
+              ><small>확대한 뒤 글자 하나를 드래그하세요.</small>
+            </div>
+            <div id="sample-viewport" class="sample-viewport" hidden>
+              <canvas
+                id="sample-canvas"
+                width="600"
+                height="400"
+                hidden
+                aria-label="샘플에서 글자 영역을 드래그해 선택"
+              ></canvas>
+            </div>
+            <button id="use-crop" class="button small" disabled>
+              선택한 영역 사용 ↗
+            </button>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <div>
+                <span class="step">02</span>
+                <h3>글자 확인 · 등록</h3>
+              </div>
+              <button id="clear-pad" class="text-button">다시 쓰기</button>
+            </div>
+            <p class="hint">
+              왼쪽에서 자르거나, 아래에 펜 · 마우스로 직접 써보세요.
+            </p>
+            <div class="draw-area">
+              <canvas
+                id="draw-pad"
+                width="720"
+                height="360"
+                aria-label="필기 입력 캔버스"
+              ></canvas
+              ><span class="baseline-label">필기 영역</span>
+            </div>
+            <div class="register-row">
+              <label
+                >어떤 글자인가요?<input
+                  id="sample-character"
+                  placeholder="예: x, ∫, 가"
+                  maxlength="2"
+                  autocomplete="off" /></label
+              ><button id="register-sample" class="button primary">
+                필기 등록 ＋
+              </button>
+            </div>
+            <p class="hint">
+              글자 하나만 입력하세요. 예: 0~9, x, y, α, β, ∫, ∑, 한글 한 글자.
+            </p>
+          </div>
+        </div>
+        <div class="card library">
+          <div class="card-top">
+            <h3>등록된 글자 <span id="library-count">0</span></h3>
+            <p class="hint">같은 글자 최대 12개 변형 · 클릭하면 삭제 선택</p>
+          </div>
+          <div id="glyph-library"></div>
+          <div id="library-empty" class="hint">
+            아직 등록된 글자가 없습니다. 자주 쓰는 숫자와 영문 변수부터
+            시작해보세요.
+          </div>
+        </div>
+      </section>
+      <section id="connect" class="tab">
+        <div class="heading">
+          <div>
+            <div class="eyebrow">YOUR TOOLS, CONNECTED.</div>
+            <h1>대화에서 PDF까지.</h1>
+            <p>MCP로 문서 읽기, 수식 배치, 필기 렌더링을 연결합니다.</p>
+          </div>
+          <span class="tag">로컬 MCP · stdio</span>
+        </div>
+        <div class="connect-grid">
+          <div class="card">
+            <h2>Codex에서 사용하기</h2>
+            <p>
+              프로젝트의 <code>mcp-config.example.json</code> 또는
+              <code>codex-mcp.example.toml</code>을 참고해 MCP 클라이언트에
+              등록하세요.
+            </p>
+            <div class="code-block">
+              .venv/Scripts/python.exe -m inklab.mcp_server
+            </div>
+            <p class="hint">
+              작업 디렉터리는 이 프로젝트 폴더로 지정합니다. MCP를 호출하는 대화
+              모델이 풀이를 작성하므로, 이 방식에서는 InkLab에 별도 OpenAI API
+              키가 필요하지 않습니다.
+            </p>
+            <div class="quote">
+              “InkLab에 올린 과제를 읽고, 1번 풀이를 LaTeX로 배치해줘. 내 필기
+              프로필을 적용해 PDF로 만들어줘.”
+            </div>
+          </div>
+          <div class="card">
+            <h2>브라우저에서 GPT 초안 생성</h2>
+            <p>
+              서버를 실행하기 전에 환경변수를 설정하세요. 키는 브라우저에
+              저장하지 않습니다.
+            </p>
+            <pre class="code-block">
+$env:OPENAI_API_KEY = "내 API 키"
+$env:OPENAI_MODEL = "사용 가능한 모델 ID"
+.\start.ps1</pre>
+            <p id="connection-status" class="hint"></p>
+            <h3>ChatGPT 웹 연결</h3>
+            <p class="hint">
+              현재 제공하는 것은 로컬 stdio MCP입니다. ChatGPT 웹에서 직접
+              연결하려면 인증을 갖춘 원격 HTTPS MCP 배포가 추가로 필요합니다.
+              localhost 주소를 외부에 공개하는 구성은 포함하지 않습니다.
+            </p>
+          </div>
+        </div>
+        <div class="card">
+          <h3>현재 지원 범위</h3>
+          <div class="capabilities">
+            <p>
+              <b>PDF 배치</b
+              ><span>다중 페이지 · 좌표 조정 · 미리보기 · 새 PDF 저장</span>
+            </p>
+            <p>
+              <b>공학 수식</b
+              ><span>분수 · 적분 · 행렬 · 연립식 · 위/아래 첨자</span>
+            </p>
+            <p>
+              <b>개인 필기</b
+              ><span>실제 글자 샘플 교체 · 여러 변형 · 한글 글자 등록</span>
+            </p>
+            <p>
+              <b>추가 연결 필요</b
+              ><span
+                >노트 전체 자동 인식 · 필기체 모델 학습 · 학교 LMS 제출</span
+              >
+            </p>
+          </div>
+        </div>
+      </section>
+      <footer>
+        inklab <span>생각의 구조는 정확하게, 글자의 모양은 나답게.</span
+        ><span>v0.1 · Local edition</span>
+      </footer>
+    </main>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/cloud-bootstrap.js?v=0.2.0"></script>
+    <script src="/app.js?v=0.2.0" defer></script>
+  </body>
+</html>

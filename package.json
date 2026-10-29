@@ -1,0 +1,14 @@
+{
+  "name": "inklab-math-engine",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "mathjax-full": "3.2.2"
+  },
+  "devDependencies": {
+    "@playwright/cli": "^0.1.22",
+    "esbuild": "^0.28.2",
+    "prettier": "^3.9.10"
+  }
+}

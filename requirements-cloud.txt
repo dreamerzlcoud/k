@@ -1,0 +1,10 @@
+fastapi==0.143.3
+uvicorn==0.54.0
+python-multipart==0.0.32
+pymupdf==1.28.2
+pillow==13.0.0
+fonttools==4.67.0
+mcp==2.3.0
+openai==3.33.0
+httpx==0.28.1
+PyJWT[crypto]==2.15.1
