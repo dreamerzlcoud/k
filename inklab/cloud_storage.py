@@ -65,6 +65,7 @@ def unpack(data, root):
 class SupabaseWorkspace:
     def __init__(self, url, publishable_key):
         self.url, self.key = url.rstrip("/"), publishable_key
+        self._cache: dict[str, tuple[str, bytes]] = {}
 
     def client(self, token):
         return httpx.Client(base_url=self.url, timeout=60, headers={
@@ -83,10 +84,18 @@ class SupabaseWorkspace:
             path = row["archive_path"]
             if not re.fullmatch(re.escape(user_id)+r"/[a-f0-9]{32}\.zip", path):
                 raise CloudError("저장소 소유자 정보가 일치하지 않습니다.", 403)
+            cached = self._cache.get(user_id)
+            if cached and cached[0] == path:
+                unpack(cached[1], root)
+                return row
             data = client.get("/storage/v1/object/authenticated/inklab-private/"+path)
             if data.status_code != 200:
                 raise CloudError("작업 공간을 읽지 못했습니다.")
             unpack(data.content, root)
+            if len(data.content) <= 15 * 1024 * 1024:
+                if len(self._cache) >= 16:
+                    self._cache.pop(next(iter(self._cache)), None)
+                self._cache[user_id] = (path, data.content)
             return row
 
     def commit(self, user_id, token, root, previous):
@@ -104,6 +113,10 @@ class SupabaseWorkspace:
             if committed.status_code != 200:
                 client.request("DELETE", "/storage/v1/object/inklab-private", json={"prefixes":[key]})
                 raise CloudError("다른 창에서 내용이 변경됐거나 저장이 거부되었습니다. 새로고침 후 다시 시도하세요.",409)
+            if len(data) <= 15 * 1024 * 1024:
+                self._cache[user_id] = (key, data)
+            else:
+                self._cache.pop(user_id, None)
             if previous["archive_path"]:
                 # Old snapshot is no longer referenced. Failure here does not undo the commit.
                 try:

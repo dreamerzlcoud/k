@@ -1,0 +1,10 @@
+FROM python:3.12-slim-bookworm
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir fastapi uvicorn pillow pymupdf fonttools httpx
+COPY inklab ./inklab
+RUN useradd -m -u 10002 inklab && chown -R inklab:inklab /app
+USER inklab
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8766
+CMD ["sh", "-c", "exec uvicorn inklab.inference_server:inference_app --host 0.0.0.0 --port ${PORT:-8766} --workers 1"]

@@ -118,7 +118,8 @@
               </div>
               <div class="button-row">
                 <button id="add-math" class="button small">＋ 수식</button
-                ><button id="add-text" class="button small">＋ 텍스트</button>
+                ><button id="add-text" class="button small">＋ 텍스트</button
+                ><button id="auto-place" class="button small" title="빈 공간 탐지 후 배치">빈 공간 배치</button>
               </div>
               <div id="block-list"></div>
               <div id="block-editor" hidden>
@@ -268,24 +269,54 @@
                 id="draw-pad"
                 width="720"
                 height="360"
+                style="touch-action: none"
                 aria-label="필기 입력 캔버스"
               ></canvas
-              ><span class="baseline-label">필기 영역</span>
+              ><span id="spen-telemetry" class="baseline-label">S펜 대기 · 필압/기울기/획 자동 기록</span>
+            </div>
+            <div id="adaptive-panel" class="hint" style="margin: 8px 0">
+              <b>AI 적응형 추천 샘플:</b> <span id="adaptive-coverage">자모 커버리지 계산 중…</span>
+              <div id="adaptive-chips" class="math-shortcuts" style="margin-top: 6px"></div>
             </div>
             <div class="register-row">
               <label
-                >어떤 글자인가요?<input
+                >어떤 글자/단어인가요?<input
                   id="sample-character"
-                  placeholder="예: x, ∫, 가"
-                  maxlength="2"
+                  placeholder="예: x, ∫, 가, 미분"
+                  maxlength="40"
                   autocomplete="off" /></label
               ><button id="register-sample" class="button primary">
                 필기 등록 ＋
               </button>
             </div>
             <p class="hint">
-              글자 하나만 입력하세요. 예: 0~9, x, y, α, β, ∫, ∑, 한글 한 글자.
+              S펜으로 한 글자 또는 단어를 쓰세요. 좌표·시간·필압·기울기·획 순서 원본이 함께 보존됩니다.
             </p>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom: 18px">
+          <div class="card-top">
+            <div>
+              <span class="step">AI</span>
+              <h3>미등록 한글 문장 AI 필체 생성 · 유사도 검증</h3>
+            </div>
+            <button id="ai-sentence-btn" class="button primary small">내 필체로 문장 생성 ↗</button>
+          </div>
+          <p class="hint">
+            소량의 S펜 샘플에서 기울기·장평·필압·리듬을 추출해 아직 쓰지 않은 한글 문장까지 합성합니다.
+          </p>
+          <div class="register-row" style="margin-top: 8px">
+            <input
+              id="ai-sentence-input"
+              value="미분방정식의 초기 조건을 대입하여 일반해를 구한다."
+              maxlength="200"
+              style="flex: 1"
+              aria-label="생성할 한글 문장"
+            />
+          </div>
+          <div id="ai-sentence-result" hidden style="margin-top: 12px">
+            <img id="ai-sentence-img" alt="생성된 필체 문장" style="max-width: 100%; background: #fffdf8; border: 1px solid #e2ddd2; border-radius: 8px; padding: 8px" />
+            <p id="ai-sentence-meta" class="hint" style="margin-top: 6px"></p>
           </div>
         </div>
         <div class="card library">

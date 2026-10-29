@@ -42,8 +42,25 @@ def create_cloud_app(identity=None, repository=None):
         auth=AuthSettings(issuer_url=supabase+"/auth/v1",resource_server_url=public+"/mcp",
                           required_scopes=["openid"],validate_token_resource=False),
         token_verifier=ContextTokenVerifier())
-    readers=["list_documents","inspect_pdf","get_page_image","get_export_page_image","list_handwriting_profiles","load_layout"]
-    for name in readers+["register_glyph"]:
+    readers = [
+        "list_documents",
+        "inspect_pdf",
+        "get_page_image",
+        "get_export_page_image",
+        "list_handwriting_profiles",
+        "load_layout",
+        "get_handwriting_profile_status",
+        "suggest_annotation_positions",
+        "get_job_status",
+        "get_export_preview",
+    ]
+    writers = [
+        "register_glyph",
+        "start_handwriting_session",
+        "generate_handwriting_sentence",
+        "analyze_and_solve_pdf",
+    ]
+    for name in readers + writers:
         server.add_tool(getattr(local,name),annotations=ToolAnnotations(
             read_only_hint=name in readers,destructive_hint=False,open_world_hint=False))
 
@@ -104,8 +121,8 @@ def create_cloud_app(identity=None, repository=None):
 class CloudGateway:
     def __init__(self, app, identity, repository, public):
         self.app,self.identity,self.repository,self.public=app,identity,repository,public
-        # PyMuPDF and the small free instance are deliberately single-job.
         self.lock=asyncio.Lock()
+        self.user_locks: dict[str, asyncio.Lock] = {}
 
     async def __call__(self,scope,receive,send):
         if scope["type"]!="http":
@@ -127,12 +144,13 @@ class CloudGateway:
             return await response(scope,receive,send)
         if not is_mcp and request.method not in ('GET','HEAD') and request.headers.get('origin')!=self.public:
             return await JSONResponse({'detail':'Origin mismatch'},403)(scope,receive,send)
-        if path=='/api/draft':
+        if path=='/api/draft' and int(request.headers.get('content-length','0'))<=4:
             return await JSONResponse({'detail':'공용 앱은 연결된 ChatGPT에서 풀이를 작성합니다.'},403)(scope,receive,send)
         if int(request.headers.get('content-length','0'))>32*1024*1024:
             return await JSONResponse({'detail':'파일이 너무 큽니다.'},413)(scope,receive,send)
+        user_lock = self.user_locks.setdefault(principal.user_id, asyncio.Lock())
         try:
-            async with self.lock:
+            async with user_lock:
                 with tempfile.TemporaryDirectory(prefix='inklab-user-') as directory:
                     root=Path(directory)
                     row=await anyio.to_thread.run_sync(self.repository.load,principal.user_id,token,root)

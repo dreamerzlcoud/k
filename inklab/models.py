@@ -20,6 +20,7 @@ class Layout(BaseModel):
     profile_id: str = "default"
     color: str = Field(default="#243d78", pattern=r"^#[0-9a-fA-F]{6}$")
     seed: int = Field(default=7, ge=0, le=2147483647)
+    use_ai: bool = True
     blocks: list[Block] = Field(default_factory=list, max_length=120)
 
 
@@ -28,9 +29,32 @@ class Draft(BaseModel):
     notes: str
 
 
+class StrokePoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    x: float = Field(ge=-10000, le=10000)
+    y: float = Field(ge=-10000, le=10000)
+    t: float = Field(default=0.0, ge=0, le=86400000)
+    pressure: float = Field(default=0.5, ge=0.0, le=1.0)
+    tilt_x: float = Field(default=0.0, ge=-90.0, le=90.0)
+    tilt_y: float = Field(default=0.0, ge=-90.0, le=90.0)
+    stroke_id: int = Field(default=0, ge=0, le=1000)
+    pen_lift: bool = False
+
+
 class Sample(BaseModel):
-    character: str = Field(min_length=1, max_length=1)
-    image: str = Field(max_length=3_000_000)
+    model_config = ConfigDict(extra="forbid")
+    character: str = Field(min_length=1, max_length=40)
+    image: str = Field(default="", max_length=3_000_000)
+    strokes: list[StrokePoint] = Field(default_factory=list, max_length=4000)
+
+
+class GenerateSentenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    profile_id: str = "default"
+    text: str = Field(min_length=1, max_length=500)
+    size: float = Field(default=24, ge=8, le=64)
+    color: str = Field(default="#243d78", pattern=r"^#[0-9a-fA-F]{6}$")
+    seed: int = Field(default=7, ge=0, le=2147483647)
 
 
 class ProfileCreate(BaseModel):

@@ -55,11 +55,16 @@ def normalize_sample(data_url: str) -> str:
         raise ValueError("이미지를 읽을 수 없거나 너무 큽니다.") from exc
 
 
-def tint_sample(encoded: str, color: str) -> Image.Image:
+@lru_cache(maxsize=512)
+def _cached_tint(encoded: str, color: str) -> Image.Image:
     image = Image.open(io.BytesIO(base64.b64decode(encoded))).convert("RGBA")
     tinted = Image.new("RGBA", image.size, ImageColor.getrgb(color))
     tinted.putalpha(image.getchannel("A"))
     return tinted
+
+
+def tint_sample(encoded: str, color: str) -> Image.Image:
+    return _cached_tint(encoded, color).copy()
 
 
 def node_binary() -> str:
@@ -158,15 +163,30 @@ def text_font(size: int):
     return ImageFont.load_default(size=size)
 
 
-def render_text(content: str, size: float, width: float, glyphs: dict, color: str, rng: random.Random):
+def render_text(
+    content: str,
+    size: float,
+    width: float,
+    glyphs: dict,
+    color: str,
+    rng: random.Random,
+    profile: dict | None = None,
+    use_ai: bool = True,
+    return_ai_stats: bool = False,
+):
+    from .handwriting_ai import extract_style_profile, is_hangul_syllable, synthesize_korean_glyph
+
     scale = 3
     pixel_size = round(size * scale)
     font = text_font(pixel_size)
     line_height = round(pixel_size * 1.65)
     max_width = round(width * scale)
+    style = extract_style_profile(profile or {"glyphs": glyphs})
+    spacing_ratio = float(style.get("letter_spacing", 0.10))
+    rhythm_ratio = float(style.get("baseline_rhythm", 0.02))
     x, y = 0, 0
     pieces = []
-    missing, used = set(), 0
+    missing, ai_generated, used, ai_used = set(), set(), 0, 0
     for char in content:
         if char == "\n":
             x, y = 0, y + line_height
@@ -176,8 +196,14 @@ def render_text(content: str, size: float, width: float, glyphs: dict, color: st
             h = pixel_size
             w = max(2, round(h * sample.width / sample.height))
             sample = sample.resize((w, h), Image.Resampling.LANCZOS)
-            advance = w + pixel_size * .10
+            advance = w + pixel_size * spacing_ratio
             used += 1
+        elif use_ai and is_hangul_syllable(char):
+            missing.add(char)
+            sample = synthesize_korean_glyph(char, pixel_size, color, profile or {"glyphs": glyphs}, rng)
+            advance = sample.width + pixel_size * spacing_ratio
+            ai_generated.add(char)
+            ai_used += 1
         else:
             sample = None
             advance = font.getlength(char)
@@ -187,26 +213,42 @@ def render_text(content: str, size: float, width: float, glyphs: dict, color: st
             raise ValueError("문자 하나가 블록 너비보다 큽니다. 너비를 늘리세요.")
         if x + advance > max_width and x:
             x, y = 0, y + line_height
-        pieces.append((char, sample, round(x), y))
+        pieces.append((char, sample, round(x), y, round(rng.gauss(0.0, pixel_size * rhythm_ratio))))
         x += advance
     height = y + line_height
     if height * max_width > 30_000_000:
         raise ValueError("텍스트 블록이 너무 큽니다. 나누어 입력하세요.")
     image = Image.new("RGBA", (max_width, height))
     draw = ImageDraw.Draw(image)
-    for char, sample, x, y in pieces:
+    for char, sample, x, y, y_jitter in pieces:
         if sample is not None:
             # Keep descenders visually below the same baseline.
             offset = round(pixel_size * .18) if char in "gjpqy" else 0
-            image.alpha_composite(sample, (x, y + round(pixel_size * .12) + offset))
+            py = max(0, min(height - sample.height, y + round(pixel_size * .12) + offset + y_jitter))
+            image.alpha_composite(sample, (x, py))
         else:
             draw.text((x, y), char, font=font, fill=color)
+    if return_ai_stats:
+        return image, width, height / scale, missing, used, ai_generated, ai_used
     return image, width, height / scale, missing, used
 
 
-def render_block(block, profile, color, seed):
+def render_block(block, profile, color, seed, use_ai: bool = True, return_ai_stats: bool = False):
     rng = random.Random(seed)
     glyphs = profile.get("glyphs", {})
     if block.kind == "math":
-        return render_math(block.content, block.size, glyphs, color, rng)
-    return render_text(block.content, block.size, block.width, glyphs, color, rng)
+        image, width, height, missing, used = render_math(block.content, block.size, glyphs, color, rng)
+        if return_ai_stats:
+            return image, width, height, missing, used, set(), 0
+        return image, width, height, missing, used
+    return render_text(
+        block.content,
+        block.size,
+        block.width,
+        glyphs,
+        color,
+        rng,
+        profile=profile,
+        use_ai=use_ai,
+        return_ai_stats=return_ai_stats,
+    )

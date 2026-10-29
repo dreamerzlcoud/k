@@ -281,6 +281,33 @@ function addBlock(kind) {
 }
 $("add-math").onclick = () => addBlock("math");
 $("add-text").onclick = () => addBlock("text");
+if ($("auto-place")) {
+  $("auto-place").onclick = () =>
+    busy($("auto-place"), async () => {
+      if (!state.doc) return;
+      const res = await api(`/documents/${state.doc.id}/blank-spaces?page=${state.page}`);
+      const regions = res.regions || [];
+      if (!regions.length) throw Error("빈 공간을 찾지 못했습니다.");
+      let rIdx = 0;
+      let curY = regions[0].y;
+      state.blocks.forEach((b) => {
+        if (b.page !== state.page) return;
+        const reg = regions[Math.min(rIdx, regions.length - 1)];
+        if (curY + b.height > reg.y + reg.height && rIdx + 1 < regions.length) {
+          rIdx++;
+          curY = regions[rIdx].y;
+        }
+        const activeReg = regions[Math.min(rIdx, regions.length - 1)];
+        b.x = Math.round(activeReg.x);
+        b.y = Math.round(curY);
+        b.width = Math.round(Math.min(b.width, activeReg.width));
+        curY += b.height + 10;
+      });
+      invalidate();
+      updateBlocks();
+      toast(`탐지된 빈 공간 ${regions.length}곳에 블록을 자동 정렬했습니다.`);
+    });
+}
 $("content").oninput = () => {
   const block = state.blocks[state.selected];
   if (block) {
@@ -353,13 +380,17 @@ $("render").onclick = () =>
     state.preview = true;
     $("download").href = result.url;
     $("download").classList.remove("disabled");
+    const aiChars = result.ai_generated_glyphs || [];
+    const fallbackOnly = (result.missing_glyphs || []).filter((c) => !aiChars.includes(c));
     $("report").textContent =
-      `직접 쓴 글자 적용: ${result.custom_glyphs_used}회\n` +
-      (result.missing_glyphs.length
-        ? `기본 글꼴로 표시한 글자: ${result.missing_glyphs.join(" ")}\n이 글자들을 필기 라이브러리에 등록하면 더 많은 부분에 내 필기가 적용됩니다.`
-        : "사용된 글자에 등록 샘플을 적용했습니다.") +
-      (result.warnings.length ? "\n" + result.warnings.join("\n") : "") +
-      "\n원본 문제와의 겹침, 수식 내용은 미리보기에서 확인하세요.";
+      `직접 쓴 글자 재사용: ${result.custom_glyphs_used}회 | AI 개인화 필체 생성: ${result.ai_glyphs_used || 0}회` +
+      (aiChars.length ? ` (${aiChars.join(" ")})` : "") +
+      "\n" +
+      (fallbackOnly.length
+        ? `기본 글꼴 폴백 기호: ${fallbackOnly.join(" ")}\n`
+        : "모든 한글 문장과 등록 글자에 개인 필체가 적용되었습니다.\n") +
+      (result.warnings.length ? result.warnings.join("\n") + "\n" : "") +
+      "원본 문제와의 겹침, 수식 검산 결과를 미리보기에서 확인하세요.";
     $("report").hidden = false;
     updatePaper();
     toast("PDF가 생성되었습니다. 미리보기를 확인하고 다운로드하세요.");
@@ -436,6 +467,27 @@ function refreshProfilesUI() {
     };
     $("glyph-library").append(button);
   });
+  refreshAdaptiveUI().catch(() => {});
+}
+async function refreshAdaptiveUI() {
+  if (!$("adaptive-coverage")) return;
+  const info = await api(`/profiles/${state.profile}/adaptive-prompts`);
+  const st = info.style_metrics || {};
+  $("adaptive-coverage").textContent =
+    `자모 커버리지 ${info.jamo_coverage_pct}% · 원본 획 ${info.stroke_glyph_count || 0}자 · 스타일(기울기 ${st.slant ?? 0}, 필압 ${st.pressure_mean ?? 0.55})`;
+  const chips = $("adaptive-chips");
+  if (!chips) return;
+  chips.replaceChildren();
+  (info.recommended_single_chars || []).slice(0, 6).forEach((item) => {
+    const btn = document.createElement("button");
+    btn.textContent = `${item.character} (${item.reason.split(" ")[0]})`;
+    btn.title = item.reason;
+    btn.onclick = () => {
+      $("sample-character").value = item.character;
+      $("sample-character").focus();
+    };
+    chips.append(btn);
+  });
 }
 function replaceProfile(profile) {
   const index = state.profiles.findIndex((p) => p.id === profile.id);
@@ -471,7 +523,9 @@ $("new-profile").onclick = async () => {
 const pad = $("draw-pad"),
   ctx = pad.getContext("2d");
 let drawing = false,
-  lastPoint;
+  lastPoint,
+  strokeId = 0,
+  padStrokes = [];
 function point(event, canvas) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -479,11 +533,31 @@ function point(event, canvas) {
     y: ((event.clientY - rect.top) * canvas.height) / rect.height,
   };
 }
+function recordPointerPoint(e, p, isLift = false) {
+  const pressure = e.pointerType === "pen" ? Math.max(0.05, e.pressure || 0.5) : (e.pressure || 0.55);
+  const tiltX = e.tiltX || 0;
+  const tiltY = e.tiltY || 0;
+  padStrokes.push({
+    x: Math.round(p.x * 100) / 100,
+    y: Math.round(p.y * 100) / 100,
+    t: Math.round(performance.now() * 10) / 10,
+    pressure: Math.round(pressure * 1000) / 1000,
+    tilt_x: tiltX,
+    tilt_y: tiltY,
+    stroke_id: strokeId,
+    pen_lift: isLift,
+  });
+  if ($("spen-telemetry")) {
+    $("spen-telemetry").textContent =
+      `${e.pointerType === "pen" ? "S펜" : "포인터"} · 필압 ${pressure.toFixed(2)} · 기울기 (${tiltX}°, ${tiltY}°) · 획 ${strokeId + 1}개 (${padStrokes.length}점)`;
+  }
+}
 pad.onpointerdown = (e) => {
   e.preventDefault();
   drawing = true;
   pad.setPointerCapture(e.pointerId);
   lastPoint = point(e, pad);
+  recordPointerPoint(e, lastPoint, false);
   ctx.fillStyle = "#243d78";
   ctx.beginPath();
   ctx.arc(lastPoint.x, lastPoint.y, 2.2, 0, Math.PI * 2);
@@ -491,37 +565,75 @@ pad.onpointerdown = (e) => {
 };
 pad.onpointermove = (e) => {
   if (!drawing) return;
-  const p = point(e, pad);
-  ctx.strokeStyle = "#243d78";
-  ctx.lineWidth =
-    4.4 * (e.pointerType === "pen" ? Math.max(0.5, e.pressure * 2) : 1);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  ctx.moveTo(lastPoint.x, lastPoint.y);
-  ctx.lineTo(p.x, p.y);
-  ctx.stroke();
-  lastPoint = p;
+  const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of events.length ? events : [e]) {
+    const p = point(ev, pad);
+    recordPointerPoint(ev, p, false);
+    ctx.strokeStyle = "#243d78";
+    ctx.lineWidth =
+      4.4 * (ev.pointerType === "pen" ? Math.max(0.4, ev.pressure * 2.1) : 1);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.x, lastPoint.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    lastPoint = p;
+  }
 };
-pad.onpointerup = pad.onpointercancel = () => (drawing = false);
-$("clear-pad").onclick = () => ctx.clearRect(0, 0, pad.width, pad.height);
+pad.onpointerup = pad.onpointercancel = (e) => {
+  if (drawing && padStrokes.length) {
+    padStrokes[padStrokes.length - 1].pen_lift = true;
+    strokeId++;
+  }
+  drawing = false;
+};
+$("clear-pad").onclick = () => {
+  ctx.clearRect(0, 0, pad.width, pad.height);
+  padStrokes = [];
+  strokeId = 0;
+  if ($("spen-telemetry")) $("spen-telemetry").textContent = "S펜 대기 · 필압/기울기/획 자동 기록";
+};
 $("register-sample").onclick = () =>
   busy($("register-sample"), async () => {
     const char = $("sample-character").value.trim();
-    if ([...char].length !== 1) throw Error("등록할 글자 하나를 입력하세요.");
+    if (!char.length) throw Error("등록할 글자나 단어를 입력하세요.");
     const profile = await api(
       `/profiles/${state.profile}/samples`,
       jsonOptions("POST", {
         character: char,
         image: pad.toDataURL("image/png"),
+        strokes: padStrokes,
       }),
     );
     replaceProfile(profile);
     invalidate();
-    toast(`‘${char}’ 필기를 등록했습니다.`);
+    toast(`‘${char}’ 필기 및 원본 S펜 획(${padStrokes.length}점)을 등록했습니다.`);
     ctx.clearRect(0, 0, pad.width, pad.height);
+    padStrokes = [];
+    strokeId = 0;
     $("sample-character").value = "";
   });
+if ($("ai-sentence-btn")) {
+  $("ai-sentence-btn").onclick = () =>
+    busy($("ai-sentence-btn"), async () => {
+      const text = $("ai-sentence-input").value.trim();
+      if (!text) throw Error("생성할 한글 문장을 입력하세요.");
+      const res = await api(
+        "/handwriting/generate",
+        jsonOptions("POST", {
+          profile_id: state.profile,
+          text,
+          size: 28,
+          color: state.color,
+        }),
+      );
+      $("ai-sentence-img").src = res.data_url || res.preview_url;
+      $("ai-sentence-meta").textContent =
+        `스타일 유사도 ${(res.similarity_score * 100).toFixed(1)}% · 직접 등록 글자 ${res.direct_glyphs.length}자 재사용 · AI 신경망 생성 ${res.ai_generated_glyphs.length}자 (기울기 ${res.style.slant}, 필압 ${res.style.pressure_mean})`;
+      $("ai-sentence-result").hidden = false;
+    });
+}
 const sampleCanvas = $("sample-canvas"),
   sampleCtx = sampleCanvas.getContext("2d");
 let cropStart = null;

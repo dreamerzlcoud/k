@@ -153,3 +153,125 @@ def test_external_stdio_mcp(tmp_path):
             tools=await client.list_tools()
             assert "get_export_page_image" in {tool.name for tool in tools.tools}
     asyncio.run(exercise())
+
+
+def test_spen_strokes_adaptive_ai_handwriting_and_math_verification():
+    from inklab.inference_server import inference_app
+    with TestClient(app) as client, TestClient(inference_app) as inf_client:
+        # 1. Tablet S-Pen stroke save & restore (coordinates, time, pressure, tilt, stroke_id, pen_lift)
+        spen_points = [
+            {"x": 20.0, "y": 15.0, "t": 10.0, "pressure": 0.78, "tilt_x": 18.0, "tilt_y": 8.0, "stroke_id": 0, "pen_lift": False},
+            {"x": 28.0, "y": 65.0, "t": 35.0, "pressure": 0.88, "tilt_x": 20.0, "tilt_y": 9.0, "stroke_id": 0, "pen_lift": True},
+            {"x": 25.0, "y": 40.0, "t": 55.0, "pressure": 0.72, "tilt_x": 16.0, "tilt_y": 7.0, "stroke_id": 1, "pen_lift": False},
+            {"x": 55.0, "y": 40.0, "t": 80.0, "pressure": 0.84, "tilt_x": 19.0, "tilt_y": 8.0, "stroke_id": 1, "pen_lift": True},
+        ]
+        res = client.post("/api/profiles/default/samples", json={
+            "character": "가",
+            "image": sample_url(),
+            "strokes": spen_points,
+        })
+        assert res.status_code == 200
+        saved_profile = res.json()
+        assert "가" in saved_profile["strokes"]
+        assert saved_profile["strokes"]["가"][0][1]["pressure"] == 0.88
+        assert saved_profile["strokes"]["가"][0][1]["pen_lift"] is True
+        assert saved_profile["style"]["personalized"] is True
+
+        # 2. Adaptive prompt endpoint & jamo coverage
+        adaptive = client.get("/api/profiles/default/adaptive-prompts")
+        assert adaptive.status_code == 200
+        adaptive_data = adaptive.json()
+        assert adaptive_data["jamo_coverage_pct"] > 0
+        assert adaptive_data["stroke_glyph_count"] == 1
+        assert len(adaptive_data["recommended_sentences"]) >= 1
+
+        # 3. Unseen Korean sentence synthesis & style similarity comparison
+        gen_res = client.post("/api/handwriting/generate", json={
+            "profile_id": "default",
+            "text": "가나다 미분해",
+            "size": 24,
+        })
+        assert gen_res.status_code == 200
+        gen_data = gen_res.json()
+        assert "가" in gen_data["direct_glyphs"]
+        assert set(gen_data["ai_generated_glyphs"]) >= {"나", "다", "미", "분", "해"}
+        assert 0.5 <= gen_data["similarity_score"] <= 1.0
+        assert client.get(gen_data["preview_url"]).status_code == 200
+
+        # 4. Standalone AI inference service & job status
+        assert inf_client.get("/health").json()["status"] == "ok"
+        job_resp = inf_client.post("/jobs/generate", json={"text": "초기 조건"})
+        assert job_resp.status_code == 200
+        job_id = job_resp.json()["job_id"]
+        assert inf_client.get(f"/jobs/{job_id}").json()["status"] == "completed"
+
+        # 5. PDF blank space detection, math verification warning, and AI vs direct glyph distinction
+        doc_info = service.import_pdf(pdf_bytes(), "test.pdf")
+        blanks = client.get(f"/api/documents/{doc_info['id']}/blank-spaces?page=0")
+        assert blanks.status_code == 200
+        assert len(blanks.json()["regions"]) >= 1
+
+        # Local AI draft without API key
+        draft_res = client.post("/api/draft", json={"document_id": doc_info["id"], "instructions": "정적분 풀이"})
+        assert draft_res.status_code == 200
+        assert len(draft_res.json()["blocks"]) >= 1
+
+        # Math verification: wrong integral value triggers warning, while unseen Korean uses AI handwriting
+        render_res = service.render_layout(Layout(
+            document_id=doc_info["id"],
+            blocks=[
+                Block(kind="text", content="가나다", x=60, y=150, width=250, height=70),
+                Block(kind="math", content=r"\int_0^1 x^2\,dx=\frac{1}{2}", x=60, y=240, width=300, height=90),
+            ],
+        ))
+        assert render_res["custom_glyphs_used"] == 1
+        assert render_res["ai_glyphs_used"] == 2
+        assert render_res["ai_generated_glyphs"] == ["나", "다"]
+        assert any("적분 검산" in w for w in render_res["warnings"])
+
+
+def test_extended_mcp_tools():
+    import asyncio
+    from mcp import Client
+    from inklab.mcp_server import mcp
+
+    async def exercise():
+        async with Client(mcp) as client:
+            tools_res = await client.list_tools()
+            names = {t.name for t in tools_res.tools}
+            assert {
+                "start_handwriting_session",
+                "get_handwriting_profile_status",
+                "generate_handwriting_sentence",
+                "suggest_annotation_positions",
+                "analyze_and_solve_pdf",
+                "get_job_status",
+                "get_export_preview",
+            } <= names
+
+            sess = await client.call_tool("start_handwriting_session", {"profile_id": "default"})
+            assert not sess.is_error
+            status = await client.call_tool("get_handwriting_profile_status", {"profile_id": "default"})
+            assert not status.is_error
+
+            gen = await client.call_tool("generate_handwriting_sentence", {"text": "일반해", "profile_id": "default"})
+            assert not gen.is_error
+            gen_payload = json.loads(gen.content[0].text)
+            job = await client.call_tool("get_job_status", {"job_id": gen_payload["job_id"]})
+            assert not job.is_error
+
+            doc_info = service.import_pdf(pdf_bytes(), "mcp-ext.pdf")
+            pos = await client.call_tool("suggest_annotation_positions", {"document_id": doc_info["id"], "page": 0})
+            assert not pos.is_error
+            solved = await client.call_tool("analyze_and_solve_pdf", {"document_id": doc_info["id"]})
+            assert not solved.is_error
+            rendered = await client.call_tool(
+                "render_pdf",
+                {"layout": Layout(document_id=doc_info["id"], blocks=[Block(content="x^2=1")]).model_dump()},
+            )
+            export_id = json.loads(rendered.content[0].text)["id"]
+            preview = await client.call_tool("get_export_preview", {"export_id": export_id, "page": 0})
+            assert not preview.is_error
+
+    import json
+    asyncio.run(exercise())

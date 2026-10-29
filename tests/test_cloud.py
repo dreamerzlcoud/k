@@ -119,7 +119,7 @@ def test_http_mcp_protocol_and_tools(shared):
     assert init.status_code==200,init.text
     response=client.post('/mcp',headers=wire,json={'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}})
     names={tool['name'] for tool in response.json()['result']['tools']}
-    assert {'open_workspace','render_pdf','get_page_image'} <= names
+    assert {'open_workspace','render_pdf','get_page_image','start_handwriting_session','generate_handwriting_sentence','suggest_annotation_positions'} <= names
     assert 'import_pdf' not in names
     result=client.post('/mcp',headers=wire,json={'jsonrpc':'2.0','id':3,'method':'tools/call',
         'params':{'name':'list_handwriting_profiles','arguments':{}}})

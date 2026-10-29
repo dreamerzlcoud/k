@@ -59,7 +59,14 @@ MCP가 실행하는 명령은 프로젝트의 Python과 `scripts/run_mcp.py`입�
 | `import_pdf` | `data/inbox` 안에 사용자가 넣은 PDF 가져오기 |
 | `get_page_image` | 원본 페이지를 모델이 볼 수 있는 이미지로 반환 |
 | `list_handwriting_profiles` | 등록 글자와 변형 개수 조회 |
-| `register_glyph` | 실제 필기 PNG 한 글자 등록 |
+| `register_glyph` | 실제 필기 PNG 및 S펜 원본 획 등록 |
+| `start_handwriting_session` | 적응형 필체 학습 세션 시작 및 부족한 자모/기호 추천 |
+| `get_handwriting_profile_status` | 등록 글자·원본 획·자모 커버리지·개인 스타일 메트릭 조회 |
+| `generate_handwriting_sentence` | 미등록 한글 문장 AI 개인화 필체 생성 (Job ID) |
+| `suggest_annotation_positions` | PDF 페이지 내 빈 공간(주석 배치 영역) 자동 탐지 |
+| `analyze_and_solve_pdf` | PDF 내용 분석·풀이 초안 생성 및 빈 공간 자동 배치 (Job ID) |
+| `get_job_status` | 장시간 AI 필체 생성·PDF 분석 작업 상태 조회 |
+| `get_export_preview` | 생성된 PDF 메타데이터·필체 사용 통계·다운로드 URL 조회 |
 | `load_layout` | 저장한 배치 불러오기 |
 | `render_pdf` | 수식·설명을 필기로 렌더링하고 편집 배치 저장 |
 | `get_export_page_image` | 생성된 결과의 페이지 이미지 확인 |

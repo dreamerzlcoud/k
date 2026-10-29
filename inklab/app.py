@@ -9,7 +9,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import service, store
 from .ai import create_draft
-from .models import AIRequest, Layout, ProfileCreate, Sample
+from .inference_server import detect_device, get_job
+from .models import AIRequest, GenerateSentenceRequest, Layout, ProfileCreate, Sample
 
 app = FastAPI(title="InkLab", version="0.1.0")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "testserver"] +
@@ -47,8 +48,22 @@ async def read_upload(file):
 
 @app.get("/api/status")
 def status():
-    return {"ai_configured": bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_MODEL")),
-            "model": os.environ.get("OPENAI_MODEL", ""), "version": "0.1.0"}
+    ai_conf = bool(
+        (os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_MODEL"))
+        or os.environ.get("GEMINI_API_KEY")
+    )
+    model_name = (
+        os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        if os.environ.get("GEMINI_API_KEY")
+        else (os.environ.get("OPENAI_MODEL") or "local-engineering-solver")
+    )
+    return {
+        "ai_configured": ai_conf,
+        "model": model_name,
+        "handwriting_ai_ready": True,
+        "device": detect_device(),
+        "version": "2.0.0",
+    }
 
 
 @app.get("/auth/config")
@@ -94,11 +109,33 @@ def add_sample(identifier: str, body: Sample):
     return service.add_sample(identifier, body)
 
 
+@app.get("/api/profiles/{identifier}/adaptive-prompts")
+def adaptive_prompts(identifier: str):
+    return service.get_profile_status(identifier)
+
+
+@app.post("/api/handwriting/generate")
+def generate_handwriting(body: GenerateSentenceRequest):
+    return service.generate_sentence_preview(body)
+
+
+@app.get("/api/documents/{identifier}/blank-spaces")
+def blank_spaces(identifier: str, page: int = 0):
+    return {"page": page, "regions": service.find_blank_spaces(identifier, page)}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str):
+    return get_job(job_id)
+
+
 @app.delete("/api/profiles/{identifier}/glyphs/{codepoint}")
 def delete_glyph(identifier: str, codepoint: int):
     with store.LOCK:
         profile = store.profile(identifier)
-        profile["glyphs"].pop(chr(codepoint), None)
+        ch = chr(codepoint)
+        profile["glyphs"].pop(ch, None)
+        profile.get("strokes", {}).pop(ch, None)
         store.write_json(store.item_path("profiles", identifier, "json"), profile)
     return profile
 
@@ -146,8 +183,6 @@ def output_page(identifier: str, page: int):
 
 @app.post("/api/draft")
 def draft(body: AIRequest):
-    if os.environ.get("INKLAB_CLOUD") == "1":
-        raise HTTPException(403, "공용 버전에서는 연결된 ChatGPT가 풀이를 작성합니다.")
     try:
         return create_draft(body.document_id, body.instructions)
     except ValueError:
